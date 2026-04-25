@@ -28,6 +28,7 @@ using SistemaDeGestionDeTicketsAereos.src.modules.seat.Application.UseCases;
 using SistemaDeGestionDeTicketsAereos.src.modules.seat.Domain.aggregate;
 using SistemaDeGestionDeTicketsAereos.src.modules.seat.Infrastructure.Repositories;
 using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Application.UseCases;
+using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Domain.valueObject;
 using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Infrastructure.Repositories;
 using SistemaDeGestionDeTicketsAereos.src.modules.systemStatus.Application.UseCases;
 using SistemaDeGestionDeTicketsAereos.src.modules.systemStatus.Infrastructure.Repositories;
@@ -517,7 +518,7 @@ public static class ClientPnrCheckInMenu
         {
             var oldSf = await sfRepo.GetBySeatAndFlightAsync(oldSeatId, idFlight, ct);
             if (oldSf is not null)
-                await updateSf.ExecuteAsync(oldSf.Id.Value, oldSeatId, idFlight, available: true, ct);
+                await updateSf.ExecuteAsync(oldSf.Id.Value, oldSeatId, idFlight, SeatFlightStatus.Disponible, ct);
         }
 
         var newSf = await sfRepo.GetBySeatAndFlightAsync(newSeatId, idFlight, ct)
@@ -525,7 +526,7 @@ public static class ClientPnrCheckInMenu
         if (!newSf.Available && newSf.IdSeat != oldSeatId)
             throw new InvalidOperationException("El asiento ya no está disponible.");
 
-        await updateSf.ExecuteAsync(newSf.Id.Value, newSeatId, idFlight, available: false, ct);
+        await updateSf.ExecuteAsync(newSf.Id.Value, newSeatId, idFlight, SeatFlightStatus.Ocupado, ct);
 
         var bcRepo = new BookingCustomerRepository(context);
         var existing = await bcRepo.GetByIdAsync(BookingCustomerId.Create(legBc.Id.Value), ct)
