@@ -7,6 +7,7 @@ using SistemaDeGestionDeTicketsAereos.src.modules.customer.UI;
 using SistemaDeGestionDeTicketsAereos.src.modules.flight.UI;
 using SistemaDeGestionDeTicketsAereos.src.modules.payment.UI;
 using SistemaDeGestionDeTicketsAereos.src.modules.report.UI;
+using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.UI;
 using SistemaDeGestionDeTicketsAereos.src.modules.ticket.UI;
 using Spectre.Console;
 
@@ -94,6 +95,7 @@ private static async Task<bool> ShowAdminMainMenuAsync()
                     "8. Gestión de Tiquetes y Check-In",
                     "9. Gestión de Pagos",
                     "10. Reportes LINQ",
+                    "11. Asientos por Vuelo",
                     "0. Salir"
                 }));
 
@@ -138,6 +140,10 @@ private static async Task<bool> ShowAdminMainMenuAsync()
 
             case "10. Reportes LINQ":
                 await new ReportsMenu().RunAsync();
+                break;
+
+            case "11. Asientos por Vuelo":
+                await new SeatConsultaMenu().RunAsync();
                 break;
 
             case "0. Salir":
