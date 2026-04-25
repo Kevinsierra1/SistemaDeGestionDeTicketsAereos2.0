@@ -11,9 +11,15 @@ public sealed class UpdateSeatFlightUseCase
 
     public async Task<SeatFlight> ExecuteAsync(int id, int idSeat, int idFlight, bool available, CancellationToken ct = default)
     {
+        var status = available ? SeatFlightStatus.Disponible : SeatFlightStatus.Reservado;
+        return await ExecuteAsync(id, idSeat, idFlight, status, ct);
+    }
+
+    public async Task<SeatFlight> ExecuteAsync(int id, int idSeat, int idFlight, SeatFlightStatus status, CancellationToken ct = default)
+    {
         var existing = await _repo.GetByIdAsync(SeatFlightId.Create(id), ct);
         if (existing is null) throw new KeyNotFoundException($"SeatFlight with id '{id}' was not found.");
-        var updated = SeatFlight.Create(id, idSeat, idFlight, available);
+        var updated = SeatFlight.Create(id, idSeat, idFlight, status);
         await _repo.UpdateAsync(updated, ct);
         return updated;
     }

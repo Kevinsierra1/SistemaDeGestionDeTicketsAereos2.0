@@ -57,7 +57,7 @@ public sealed class SeatFlightRepository : ISeatFlightRepository
         }
 
         var values = ToEntity(seatFlight);
-        entity.Available = values.Available;
+        entity.Status = values.Status;
     }
 
     public async Task DeleteAsync(SeatFlightId id, CancellationToken ct = default)
@@ -74,7 +74,7 @@ public sealed class SeatFlightRepository : ISeatFlightRepository
 
     private static SeatFlight ToDomain(SeatFlightEntity entity)
     {
-        return SeatFlight.Create(entity.IdSeatFlight, entity.IdSeat, entity.IdFlight, entity.Available);
+        return SeatFlight.Create(entity.IdSeatFlight, entity.IdSeat, entity.IdFlight, ParseStatus(entity.Status));
     }
 
     private static SeatFlightEntity ToEntity(SeatFlight aggregate)
@@ -84,7 +84,18 @@ public sealed class SeatFlightRepository : ISeatFlightRepository
             IdSeatFlight = aggregate.Id.Value,
             IdSeat = aggregate.IdSeat,
             IdFlight = aggregate.IdFlight,
-            Available = aggregate.Available
+            Status = aggregate.Status.ToString()
         };
+    }
+
+    private static SeatFlightStatus ParseStatus(string? rawStatus)
+    {
+        if (!string.IsNullOrWhiteSpace(rawStatus) &&
+            Enum.TryParse<SeatFlightStatus>(rawStatus, ignoreCase: true, out var parsed))
+        {
+            return parsed;
+        }
+
+        return SeatFlightStatus.Disponible;
     }
 }

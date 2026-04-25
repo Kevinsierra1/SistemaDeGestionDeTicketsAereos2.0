@@ -16,8 +16,8 @@ public class SeatFlightEntity
     // FK al vuelo en el que aplica esta disponibilidad
     public int IdFlight { get; set; }
 
-    // Indica si el asiento está disponible para ser reservado en este vuelo
-    public bool Available { get; set; }
+    // Estado del asiento en el vuelo: Disponible, Reservado, Ocupado o Bloqueado
+    public string Status { get; set; } = "Disponible";
 
     // Navegación al asiento
     public SeatEntity Seat { get; set; } = null!;

@@ -41,6 +41,7 @@ using SistemaDeGestionDeTicketsAereos.src.modules.seat.Infrastructure.Repositori
 using SistemaDeGestionDeTicketsAereos.src.modules.seatClass.Application.UseCases;
 using SistemaDeGestionDeTicketsAereos.src.modules.seatClass.Infrastructure.Repositories;
 using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Application.UseCases;
+using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Domain.valueObject;
 using SistemaDeGestionDeTicketsAereos.src.modules.seatFlight.Infrastructure.Repositories;
 using SistemaDeGestionDeTicketsAereos.src.modules.systemStatus.Application.UseCases;
 using SistemaDeGestionDeTicketsAereos.src.modules.systemStatus.Infrastructure.Repositories;
@@ -444,10 +445,12 @@ public sealed class BookingMenu
             {
                 var option = AnsiConsole.Prompt(
                     new SelectionPrompt<string>()
-                        .PageSize(9)
+                        .PageSize(12)
                         .AddChoices("1. Crear reserva", "2. Listar reservas", "3. Actualizar reserva",
                                     "4. Agregar pasajero a reserva", "5. Registrar cambio de estado",
-                                    "6. Cancelar reserva", "7. Eliminar reserva", "0. Volver"));
+                                    "6. Cancelar reserva", "7. Eliminar reserva",
+                                    "8. Ver asientos por vuelo", "9. Consultar disponibilidad por clase",
+                                    "10. Ver asientos ocupados", "0. Volver"));
                 switch (option)
                 {
                     case "1. Crear reserva":               await CreateAsync(ct);          break;
@@ -457,6 +460,9 @@ public sealed class BookingMenu
                     case "5. Registrar cambio de estado":  await AddStatusHistoryAsync(ct);break;
                     case "6. Cancelar reserva":            await CancelAsync(ct);          break;
                     case "7. Eliminar reserva":            await DeleteAsync(ct);          break;
+                    case "8. Ver asientos por vuelo":      await ViewSeatsByFlightAsync(ct); break;
+                    case "9. Consultar disponibilidad por clase": await ViewAvailabilityByClassAsync(ct); break;
+                    case "10. Ver asientos ocupados":      await ViewOccupiedSeatsAsync(ct); break;
                     case "0. Volver": back = true; break;
                 }
             }
@@ -544,6 +550,219 @@ public sealed class BookingMenu
         }
 
         AnsiConsole.MarkupLine("\n[grey]Presiona cualquier tecla para continuar...[/]"); Console.ReadKey();
+    }
+
+    private static async Task<(int idFlight, string label)?> PromptFlightForSeatQueriesAsync(AppDbContext context, CancellationToken ct)
+    {
+        var flights = (await new GetAllFlightsUseCase(new FlightRepository(context)).ExecuteAsync(ct))
+            .OrderBy(f => f.Date.Value)
+            .ThenBy(f => f.DepartureTime.Value)
+            .ToList();
+
+        if (flights.Count == 0)
+            return null;
+
+        var pick = AnsiConsole.Prompt(
+            new SelectionPrompt<string>()
+                .Title("Selecciona el vuelo:")
+                .PageSize(12)
+                .AddChoices(flights.Select(f =>
+                    $"{f.Id.Value}. {f.Number.Value} — {f.Date.Value:yyyy-MM-dd} {f.DepartureTime.Value:HH\\:mm}")));
+
+        var idFlight = int.Parse(pick.Split('.')[0], CultureInfo.InvariantCulture);
+        return (idFlight, pick[(pick.IndexOf('.') + 1)..].Trim());
+    }
+
+    private static async Task ViewSeatsByFlightAsync(CancellationToken ct)
+    {
+        Console.Clear();
+        AnsiConsole.Write(new Rule("[yellow]ASIENTOS POR VUELO[/]").Centered());
+        using var context = DbContextFactory.Create();
+
+        var selected = await PromptFlightForSeatQueriesAsync(context, ct);
+        if (selected is null)
+        {
+            AnsiConsole.MarkupLine("[yellow]No hay vuelos registrados.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var (idFlight, flightLabel) = selected.Value;
+        var seatFlights = (await new GetAllSeatFlightsUseCase(new SeatFlightRepository(context)).ExecuteAsync(ct))
+            .Where(sf => sf.IdFlight == idFlight)
+            .ToList();
+        var seats = await new GetAllSeatsUseCase(new SeatRepository(context)).ExecuteAsync(ct);
+        var seatClasses = await new GetAllSeatClassesUseCase(new SeatClassRepository(context)).ExecuteAsync(ct);
+        var seatMap = seats.ToDictionary(s => s.Id.Value);
+        var classMap = seatClasses.ToDictionary(c => c.Id.Value, c => c.Name.Value);
+
+        if (seatFlights.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]El vuelo {Markup.Escape(flightLabel)} no tiene mapa de asientos generado.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var rows = seatFlights
+            .Where(sf => seatMap.ContainsKey(sf.IdSeat))
+            .Select(sf =>
+            {
+                var seat = seatMap[sf.IdSeat];
+                var className = classMap.TryGetValue(seat.IdClase, out var cn) ? cn : $"Clase {seat.IdClase}";
+                return new { SeatNo = seat.Number.Value, Class = className, Status = sf.Status.ToString() };
+            })
+            .OrderBy(r => r.SeatNo, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Asiento");
+        table.AddColumn("Clase");
+        table.AddColumn("Estado");
+        foreach (var row in rows)
+            table.AddRow(Markup.Escape(row.SeatNo), Markup.Escape(row.Class), Markup.Escape(row.Status));
+
+        AnsiConsole.MarkupLine($"[grey]Vuelo: {Markup.Escape(flightLabel)}[/]");
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine("\n[grey]Presiona cualquier tecla para continuar...[/]");
+        Console.ReadKey();
+    }
+
+    private static async Task ViewAvailabilityByClassAsync(CancellationToken ct)
+    {
+        Console.Clear();
+        AnsiConsole.Write(new Rule("[yellow]DISPONIBILIDAD POR CLASE[/]").Centered());
+        using var context = DbContextFactory.Create();
+
+        var selected = await PromptFlightForSeatQueriesAsync(context, ct);
+        if (selected is null)
+        {
+            AnsiConsole.MarkupLine("[yellow]No hay vuelos registrados.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var (idFlight, flightLabel) = selected.Value;
+        var seatFlights = (await new GetAllSeatFlightsUseCase(new SeatFlightRepository(context)).ExecuteAsync(ct))
+            .Where(sf => sf.IdFlight == idFlight)
+            .ToList();
+        var seats = await new GetAllSeatsUseCase(new SeatRepository(context)).ExecuteAsync(ct);
+        var seatClasses = await new GetAllSeatClassesUseCase(new SeatClassRepository(context)).ExecuteAsync(ct);
+        var seatMap = seats.ToDictionary(s => s.Id.Value);
+        var classMap = seatClasses.ToDictionary(c => c.Id.Value, c => c.Name.Value);
+
+        var grouped = seatFlights
+            .Where(sf => seatMap.ContainsKey(sf.IdSeat))
+            .GroupBy(sf => seatMap[sf.IdSeat].IdClase)
+            .Select(g =>
+            {
+                var total = g.Count();
+                var disponibles = g.Count(sf => sf.Status == SeatFlightStatus.Disponible);
+                var reservados = g.Count(sf => sf.Status == SeatFlightStatus.Reservado);
+                var ocupados = g.Count(sf => sf.Status == SeatFlightStatus.Ocupado);
+                var bloqueados = g.Count(sf => sf.Status == SeatFlightStatus.Bloqueado);
+                var pct = total == 0 ? 0d : ((reservados + ocupados) * 100d / total);
+                return new
+                {
+                    ClassName = classMap.TryGetValue(g.Key, out var n) ? n : $"Clase {g.Key}",
+                    Total = total,
+                    Disponibles = disponibles,
+                    Reservados = reservados,
+                    Ocupados = ocupados,
+                    Bloqueados = bloqueados,
+                    Pct = pct
+                };
+            })
+            .OrderBy(x => x.ClassName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (grouped.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]El vuelo {Markup.Escape(flightLabel)} no tiene asientos para consultar.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Clase");
+        table.AddColumn("Total");
+        table.AddColumn("Disponibles");
+        table.AddColumn("Reservados");
+        table.AddColumn("Ocupados");
+        table.AddColumn("Bloqueados");
+        table.AddColumn("Ocupación %");
+        foreach (var row in grouped)
+        {
+            table.AddRow(
+                Markup.Escape(row.ClassName),
+                row.Total.ToString(CultureInfo.InvariantCulture),
+                row.Disponibles.ToString(CultureInfo.InvariantCulture),
+                row.Reservados.ToString(CultureInfo.InvariantCulture),
+                row.Ocupados.ToString(CultureInfo.InvariantCulture),
+                row.Bloqueados.ToString(CultureInfo.InvariantCulture),
+                $"{row.Pct:F1}%");
+        }
+
+        AnsiConsole.MarkupLine($"[grey]Vuelo: {Markup.Escape(flightLabel)}[/]");
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine("\n[grey]Presiona cualquier tecla para continuar...[/]");
+        Console.ReadKey();
+    }
+
+    private static async Task ViewOccupiedSeatsAsync(CancellationToken ct)
+    {
+        Console.Clear();
+        AnsiConsole.Write(new Rule("[yellow]ASIENTOS OCUPADOS[/]").Centered());
+        using var context = DbContextFactory.Create();
+
+        var selected = await PromptFlightForSeatQueriesAsync(context, ct);
+        if (selected is null)
+        {
+            AnsiConsole.MarkupLine("[yellow]No hay vuelos registrados.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var (idFlight, flightLabel) = selected.Value;
+        var occupiedSeatIds = (await new GetAllSeatFlightsUseCase(new SeatFlightRepository(context)).ExecuteAsync(ct))
+            .Where(sf => sf.IdFlight == idFlight && sf.Status == SeatFlightStatus.Ocupado)
+            .Select(sf => sf.IdSeat)
+            .ToHashSet();
+        var seats = await new GetAllSeatsUseCase(new SeatRepository(context)).ExecuteAsync(ct);
+        var seatClasses = await new GetAllSeatClassesUseCase(new SeatClassRepository(context)).ExecuteAsync(ct);
+        var classMap = seatClasses.ToDictionary(c => c.Id.Value, c => c.Name.Value);
+        var occupied = seats
+            .Where(s => occupiedSeatIds.Contains(s.Id.Value))
+            .OrderBy(s => s.Number.Value, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (occupied.Count == 0)
+        {
+            AnsiConsole.MarkupLine($"[yellow]No hay asientos en estado Ocupado para el vuelo {Markup.Escape(flightLabel)}.[/]");
+            AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+            Console.ReadKey();
+            return;
+        }
+
+        var table = new Table().Border(TableBorder.Rounded);
+        table.AddColumn("Asiento");
+        table.AddColumn("Clase");
+        table.AddColumn("Estado");
+        foreach (var seat in occupied)
+        {
+            var className = classMap.TryGetValue(seat.IdClase, out var n) ? n : $"Clase {seat.IdClase}";
+            table.AddRow(Markup.Escape(seat.Number.Value), Markup.Escape(className), "Ocupado");
+        }
+
+        AnsiConsole.MarkupLine($"[grey]Vuelo: {Markup.Escape(flightLabel)}[/]");
+        AnsiConsole.Write(table);
+        AnsiConsole.MarkupLine($"\n[bold]Total ocupados:[/] {occupied.Count}");
+        AnsiConsole.MarkupLine("[grey]Presiona cualquier tecla para continuar...[/]");
+        Console.ReadKey();
     }
 
     /// <summary>Cliente: detalle en paneles de cada reserva propia pagada (solo lectura).</summary>
